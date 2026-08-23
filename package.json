@@ -1,4 +1,10 @@
 {
+  "scripts": {
+    "dev": "npm --prefix client run dev",
+    "build": "npm --prefix client run build",
+    "lint": "npm --prefix client run lint",
+    "preview": "npm --prefix client run preview"
+  },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.18",
     "tailwindcss": "^4.1.18"
