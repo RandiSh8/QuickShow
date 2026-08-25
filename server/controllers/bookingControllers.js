@@ -1,7 +1,8 @@
 import Show from "../models/Show.js";
 import Booking from "../models/Booking.js";
 import { getUserIdFromRequest } from "../middleware/auth.js";
-import stripe from 'stripe'
+import stripe from 'stripe';
+import { inngest } from "../inngest/index.js";
 
 // Function to check availability of selected seats for a movie
 const checkSeatsAvailability = async (showId, selectedSeats) => {
@@ -67,7 +68,7 @@ export const createBooking = async (req, res) => {
 
         // create a stripe session
         const session = await stripeInstance.checkout.sessions.create({
-            success_url: `${origin}/loading/my-bookings`,
+            success_url: `${origin}/loading/my-bookings?session_id={CHECKOUT_SESSION_ID}`,
             cancel_url: `${origin}/my-bookings`,
             line_items: lineItems,
             mode: 'payment',
@@ -76,10 +77,43 @@ export const createBooking = async (req, res) => {
             },
             expires_at: Math.floor(Date.now() / 1000) + (30 * 60), // Stripe minimum expiration is 30 minutes
         });
-        booking.paymentLink = session.url
+        booking.paymentLink = session.url;
         await booking.save();
+// Run Inngest scheduler function to check payment status after 10 minutes
+      await inngest.send({
+        name: "app/checkpayment",
+        data:{
+          bookingId: booking._id.toString()
+        }
+      }) 
 
         res.json({ success: true, url: session.url });
+    } catch (error) {
+        console.log(error.message);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+export const verifyPayment = async (req, res) => {
+    try {
+        const { session_id } = req.body;
+        if (!session_id) {
+            return res.json({ success: false, message: "Session ID required" });
+        }
+        const stripeInstance = new stripe(process.env.STRIPE_SECRET_KEY);
+        const session = await stripeInstance.checkout.sessions.retrieve(session_id);
+
+        if (session && session.payment_status === "paid") {
+            const { bookingId } = session.metadata || {};
+            if (bookingId) {
+                await Booking.findByIdAndUpdate(bookingId, {
+                    isPaid: true,
+                    paymentLink: ""
+                });
+                return res.json({ success: true, message: "Payment verified successfully" });
+            }
+        }
+        res.json({ success: false, message: "Payment not verified" });
     } catch (error) {
         console.log(error.message);
         res.json({ success: false, message: error.message });
