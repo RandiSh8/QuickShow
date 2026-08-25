@@ -91,7 +91,7 @@ export const addShow = async (req, res) => {
 // API to get all shows from the database
 export const getShows = async (req, res) => {
     try {
-        const currentIsoDate = new Date().toISOString();
+        const currentIsoDate = new Date().toISOString().slice(0, 10);
         const shows = await Show.find({ showDateTime: { $gte: currentIsoDate } })
             .populate('movie')
             .sort({ showDateTime: 1 });

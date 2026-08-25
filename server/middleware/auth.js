@@ -1,42 +1,51 @@
 import { clerkClient, getAuth, verifyToken } from "@clerk/express";
 
-export const protectAdmin = async (req, res, next) => {
+export const getUserIdFromRequest = async (req) => {
+    let userId = null;
     try {
-        let userId = null;
-
-        // 1. Try to get userId from req.auth() or getAuth(req)
-        const auth = typeof req.auth === 'function' ? req.auth() : getAuth(req);
-        if (auth?.userId) {
-            userId = auth.userId;
+        if (typeof req.auth === 'function') {
+            const auth = req.auth();
+            if (auth?.userId) userId = auth.userId;
         }
+    } catch (e) {}
 
-        // 2. Fallback to verifying Bearer JWT token if userId is missing
-        if (!userId && req.headers.authorization) {
-            const token = req.headers.authorization.replace(/^Bearer\s+/i, '').trim();
-            if (token && token !== 'null' && token !== 'undefined') {
+    if (!userId) {
+        try {
+            const auth = getAuth(req);
+            if (auth?.userId) userId = auth.userId;
+        } catch (e) {}
+    }
+
+    if (!userId && req.headers?.authorization) {
+        const token = req.headers.authorization.replace(/^Bearer\s+/i, '').trim();
+        if (token && token !== 'null' && token !== 'undefined') {
+            try {
+                const verified = await verifyToken(token, {
+                    secretKey: process.env.CLERK_SECRET_KEY,
+                    clockSkewInMs: 300000,
+                });
+                userId = verified.sub;
+            } catch (jwtErr) {
                 try {
-                    const verified = await verifyToken(token, {
-                        secretKey: process.env.CLERK_SECRET_KEY,
-                        clockSkewInMs: 300000,
-                    });
-                    userId = verified.sub;
-                } catch (jwtErr) {
-                    console.log("--> [protectAdmin] JWT verify notice:", jwtErr.message);
-                    try {
-                        const parts = token.split('.');
-                        if (parts.length === 3) {
-                            const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-                            if (payload?.sub) {
-                                userId = payload.sub;
-                            }
+                    const parts = token.split('.');
+                    if (parts.length === 3) {
+                        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+                        if (payload?.sub) {
+                            userId = payload.sub;
                         }
-                    } catch (e) {
-                        console.error("--> [protectAdmin] JWT payload decode error:", e.message);
                     }
+                } catch (e) {
+                    console.error("JWT payload decode error:", e.message);
                 }
             }
         }
+    }
+    return userId;
+};
 
+export const protectAdmin = async (req, res, next) => {
+    try {
+        const userId = await getUserIdFromRequest(req);
         console.log("--> [protectAdmin] resolved userId:", userId);
 
         if (!userId) {
