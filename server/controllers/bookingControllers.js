@@ -1,6 +1,7 @@
 import Show from "../models/Show.js";
 import Booking from "../models/Booking.js";
-import { getAuth } from "@clerk/express";
+import { getUserIdFromRequest } from "../middleware/auth.js";
+import stripe from 'stripe'
 
 // Function to check availability of selected seats for a movie
 const checkSeatsAvailability = async (showId, selectedSeats) => {
@@ -18,11 +19,12 @@ const checkSeatsAvailability = async (showId, selectedSeats) => {
 
 export const createBooking = async (req, res) => {
     try {
-        const { userId } = getAuth(req);
+        const userId = await getUserIdFromRequest(req);
         if (!userId) {
             return res.json({ success: false, message: "User not authenticated" });
         }
         const { showId, selectedSeats } = req.body;
+        const {origin} = req.headers;
 
         // Check if seats are available
         const isAvailable = await checkSeatsAvailability(showId, selectedSeats);
@@ -51,7 +53,33 @@ export const createBooking = async (req, res) => {
         showData.markModified('occupiedSeats');
         await showData.save();
 
-        res.json({ success: true, message: "Booking created successfully", booking });
+        // Stripe Gateway (payment page)
+        const stripeInstance = new stripe(process.env.STRIPE_SECRET_KEY);
+        // creating line items for stripe
+        const lineItems = [{
+            price_data: {
+                currency: 'usd',
+                product_data: { name: showData.movie.title },
+                unit_amount: Math.floor(booking.amount) * 100
+            },
+            quantity: 1,
+        }];
+
+        // create a stripe session
+        const session = await stripeInstance.checkout.sessions.create({
+            success_url: `${origin}/loading/my-bookings`,
+            cancel_url: `${origin}/my-bookings`,
+            line_items: lineItems,
+            mode: 'payment',
+            metadata: {
+                bookingId: booking._id.toString()
+            },
+            expires_at: Math.floor(Date.now() / 1000) + (30 * 60), // Stripe minimum expiration is 30 minutes
+        });
+        booking.paymentLink = session.url
+        await booking.save();
+
+        res.json({ success: true, url: session.url });
     } catch (error) {
         console.log(error.message);
         res.json({ success: false, message: error.message });
@@ -62,10 +90,14 @@ export const getOccupiedSeats = async (req, res) => {
     try {
         const { showId } = req.params;
         const showData = await Show.findById(showId);
-        const occupiedSeats = showData && showData.occupiedSeats ? Object.keys(showData.occupiedSeats) : [];
+        if (!showData) {
+            return res.json({ success: true, occupiedSeats: [] });
+        }
+        const showObj = showData.toObject();
+        const occupiedSeats = showObj.occupiedSeats ? Object.keys(showObj.occupiedSeats) : [];
         res.json({ success: true, occupiedSeats });
     } catch (error) {
         console.log(error.message);
         res.json({ success: false, message: error.message });
     }
-};
+};

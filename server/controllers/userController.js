@@ -1,11 +1,12 @@
 import Booking from "../models/Booking.js";
-import { clerkClient, getAuth } from "@clerk/express";
+import { clerkClient } from "@clerk/express";
 import Movie from "../models/Movie.js";
+import { getUserIdFromRequest } from "../middleware/auth.js";
 
 // API controller function to get user bookings
 export const getUserBookings = async (req, res) => {
     try {
-        const { userId } = getAuth(req);
+        const userId = await getUserIdFromRequest(req);
         if (!userId) {
             return res.json({ success: true, bookings: [] });
         }
@@ -23,19 +24,20 @@ export const getUserBookings = async (req, res) => {
 export const updateFavorite = async (req, res) => {
     try {
         const { movieId } = req.body;
-        const { userId } = getAuth(req);
+        const userId = await getUserIdFromRequest(req);
         if (!userId) {
             return res.json({ success: false, message: "User not authenticated" });
         }
         const user = await clerkClient.users.getUser(userId);
 
-        const currentFavorites = user.privateMetadata?.favorites || [];
+        const targetId = String(movieId);
+        const currentFavorites = (user.privateMetadata?.favorites || []).map(id => String(id));
         let updatedFavorites;
 
-        if (!currentFavorites.includes(movieId)) {
-            updatedFavorites = [...currentFavorites, movieId];
+        if (!currentFavorites.includes(targetId)) {
+            updatedFavorites = [...currentFavorites, targetId];
         } else {
-            updatedFavorites = currentFavorites.filter((item) => item !== movieId);
+            updatedFavorites = currentFavorites.filter((item) => String(item) !== targetId);
         }
 
         const privateMetadata = { ...user.privateMetadata, favorites: updatedFavorites };
@@ -50,12 +52,12 @@ export const updateFavorite = async (req, res) => {
 
 export const getFavorites = async (req, res) => {
     try {
-        const { userId } = getAuth(req);
+        const userId = await getUserIdFromRequest(req);
         if (!userId) {
             return res.json({ success: true, movies: [] });
         }
         const user = await clerkClient.users.getUser(userId);
-        const favorites = user.privateMetadata?.favorites || [];
+        const favorites = (user.privateMetadata?.favorites || []).map(id => String(id));
 
         // Getting movies from database
         const movies = await Movie.find({ _id: { $in: favorites } });
