@@ -17,7 +17,8 @@ const TrailersSection = () => {
         <BlurCircle top="-100px" right="-100px" />
         <ReactPlayer
           url={currentTrailer.videoUrl}
-          controls={false}
+          controls={true}
+          light={currentTrailer.image}
           className="mx-auto max-w-full"
           width="960px"
           height="540px"
