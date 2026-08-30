@@ -105,10 +105,16 @@ export const verifyPayment = async (req, res) => {
 
         if (session && session.payment_status === "paid") {
             const { bookingId } = session.metadata || {};
+            const customerEmail = session.customer_details?.email;
             if (bookingId) {
                 await Booking.findByIdAndUpdate(bookingId, {
                     isPaid: true,
                     paymentLink: ""
+                });
+                // Trigger email confirmation event via Inngest
+                await inngest.send({
+                    name: "app/show.booked",
+                    data: { bookingId, customerEmail }
                 });
                 return res.json({ success: true, message: "Payment verified successfully" });
             }
